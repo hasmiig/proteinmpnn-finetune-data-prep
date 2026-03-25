@@ -13,7 +13,7 @@ This pipeline addresses this in two sequential phases:
 - **Phase 1** — balances peptide counts *across* MHC alleles using iterative median sampling, capped at `SAMPLE_CAP` (default: 1000) peptides per allele
 - **Phase 2** — within each allele independently, balances anchor residue diversity at position P2 (anchor 1) and the last peptide position (anchor 2) using the same iterative median sampling strategy
 
-The pipeline can be run in `--mode nonbinder` or `--mode binder` to process each class separately.
+The pipeline can be run in `--mode nonbinder` or `--mode binder` to process each class separately, and with `--phases both` or `--phases only_phase1` depending on whether anchor balancing is needed.
 
 ---
 
@@ -94,23 +94,27 @@ Use these to understand the shape of the raw data before committing to a full ru
 
 ### Step 2 — Run the full pipeline
 
+**Both phases (recommended for non-binders):**
 ```bash
-# non-binders
 python pmhc_sampling.py \
     --input data.parquet \
     --mode nonbinder \
+    --phases both \
     --output nonbinders_sampled.parquet \
     --plots plots/nonbinders/
+```
 
-# binders
+**Phase 1 only (recommended for binders, where anchor dominance is biological):**
+```bash
 python pmhc_sampling.py \
     --input data.parquet \
     --mode binder \
+    --phases only_phase1 \
     --output binders_sampled.parquet \
     --plots plots/binders/
 ```
 
-The pipeline will:
+When running with `--phases both`, the pipeline will:
 1. Filter to MHC class I peptides of the specified type (binder or non-binder)
 2. Remove duplicates (same peptide + allele pair)
 3. Remove peptides with non-standard amino acid characters (e.g. placeholders, rare AAs)
@@ -118,6 +122,8 @@ The pipeline will:
 5. Run Phase 1: iterative median sampling across alleles
 6. Run Phase 2: iterative median sampling of anchor residues within each allele
 7. Save all plots, statistics, and the final sampled dataset
+
+When running with `--phases only_phase1`, steps 1–5 and 7 are run but Phase 2 is skipped. All plots are still generated but show only two stages (Raw and Post-Phase 1) instead of three.
 
 ---
 
@@ -127,6 +133,7 @@ The pipeline will:
 |---|---|---|
 | `--input` | Yes | Path to input file (`.parquet`, `.tsv`, `.csv`) |
 | `--mode` | Yes (for sampling) | `binder` or `nonbinder` |
+| `--phases` | No | `both` (default) or `only_phase1` — whether to run anchor balancing |
 | `--output` | Yes (for sampling) | Path to save the final sampled dataset |
 | `--plots` | No | Directory for plots and stats (default: `plots/`) |
 | `--inspect` | No | Print schema and first rows, then exit. `--mode` not required. |
@@ -136,18 +143,18 @@ The pipeline will:
 
 ## Outputs
 
-All plots and stats are saved to the `--plots` directory. The final sampled dataset is saved to `--output`.
+All plots and stats are saved to the `--plots` directory. The final sampled dataset is saved to `--output`. Files marked with * are only produced when `--phases both` is used.
 
 ### Statistics
 | File | Description |
 |---|---|
 | `stats_report.txt` | Full text summary of row counts, allele counts, peptide lengths, anchor frequencies at each pipeline stage |
-| `stats_summary.csv` | Numeric summary table, one row per stage (raw / phase 1 / phase 2) |
+| `stats_summary.csv` | Numeric summary table, one row per stage |
 
 ### Comparison Plots
 | File | Description |
 |---|---|
-| `comparison_allele_distribution.png` | Peptide count per allele at each stage |
+| `comparison_allele_distribution.png` | Peptide count per allele at each stage (2 or 3 panels depending on `--phases`) |
 | `comparison_peptide_lengths.png` | Peptide length distribution at each stage |
 | `comparison_anchor1_residues.png` | Global P2 anchor residue frequencies at each stage |
 | `comparison_anchor2_residues.png` | Global last-position anchor residue frequencies at each stage |
@@ -157,25 +164,25 @@ All plots and stats are saved to the `--plots` directory. The final sampled data
 |---|---|
 | `per_allele_anchor1_postphase1.png` | Per-allele P2 anchor AA fractions after Phase 1 (50 alleles per panel) |
 | `per_allele_anchor2_postphase1.png` | Per-allele last-position anchor AA fractions after Phase 1 |
-| `per_allele_anchor1_postphase2.png` | Per-allele P2 anchor AA fractions after Phase 2 |
-| `per_allele_anchor2_postphase2.png` | Per-allele last-position anchor AA fractions after Phase 2 |
+| `per_allele_anchor1_postphase2.png` * | Per-allele P2 anchor AA fractions after Phase 2 |
+| `per_allele_anchor2_postphase2.png` * | Per-allele last-position anchor AA fractions after Phase 2 |
 
 ### KL Divergence
 | File | Description |
 |---|---|
-| `anchor_kl_divergence_boxplot.png` | Per-allele KL divergence vs Uniform(1/20) for both anchor positions, post-phase 1 and post-phase 2. Includes reference lines for canonical dominance baselines (top-1, 2, 4, 8, 16 AA). Broken y-axis separates the bulk distribution from outliers. |
-| `high_kl_alleles.csv` | Alleles where anchor dominance persists after Phase 2 — flagged when KL is above the top-16 AA baseline AND reduced by less than 5% between phases. Includes sample counts at each stage. |
+| `anchor_kl_divergence_boxplot.png` | Per-allele KL divergence vs Uniform(1/20) for both anchor positions. Includes reference lines for canonical dominance baselines (top-1, 2, 4, 8, 16 AA). Shows one box per stage. |
+| `high_kl_alleles.csv` * | Alleles where anchor dominance persists after Phase 2 — flagged when KL is above the top-16 AA baseline AND reduced by less than 5% between phases. |
 
 ### Anchor Combination
 | File | Description |
 |---|---|
-| `anchor_combo_heatmap.png` | 20×20 heatmap of anchor combination counts (P2 × last position) at each stage |
-| `anchor_combo_stats.csv` | Per-allele anchor combination diversity statistics after Phase 2 |
+| `anchor_combo_heatmap.png` | 20×20 heatmap of anchor combination counts (P2 × last position) at each stage (2 or 3 panels depending on `--phases`) |
+| `anchor_combo_stats.csv` | Per-allele anchor combination diversity statistics for the final stage |
 
 ### Sampled Dataset
 | File | Description |
 |---|---|
-| `<output>` | Final sampled dataset after both phases, ready for downstream use |
+| `<output>` | Final sampled dataset after Phase 1 or both phases, ready for downstream use |
 
 ---
 
@@ -197,4 +204,3 @@ SAMPLE_CAP      = 1000   # maximum peptides per allele after Phase 1
 MAX_PEPTIDE_LEN = 15     # peptides of this length or longer are removed
 ```
 
----
