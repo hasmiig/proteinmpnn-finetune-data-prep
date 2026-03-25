@@ -1,4 +1,4 @@
 *.parquet
 *.csv
-plots/
+plots*/
 __pycache__/

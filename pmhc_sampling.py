@@ -121,13 +121,14 @@ def get_seq(key: str, seq_dict: dict):
     )
 
 
-def load_data(path: str, mode: str = "nonbinder") -> pd.DataFrame:
+def load_data(path: str, mode: str = "nonbinder", phases: str = "both") -> pd.DataFrame:
     """Load file, keep MHC class I binders or non-binders, deduplicate, normalise allele names."""
     assert mode in ("binder", "nonbinder"), f"mode must be 'binder' or 'nonbinder', got '{mode}'"
+    assert phases in ("only_phase1", "both"), f"phases must be 'only_phase1' or 'both', got '{phases}'"
     label_val  = 1.0 if mode == "binder" else 0.0
     label_name = "Binder" if mode == "binder" else "Non-binder"
 
-    log.info(f"Loading data from {path} (mode={mode}) ...")
+    log.info(f"Loading data from {path} (mode={mode}, phases={phases}) ...")
     df = _read_file(path)
     log.info(f"  Total rows      : {len(df):,}")
     log.info(f"  Columns         : {list(df.columns)}")
@@ -526,57 +527,51 @@ def _anchor_combo_matrix(df: pd.DataFrame) -> pd.DataFrame:
     Rows = anchor 1 (P2), Columns = anchor 2 (last position).
     All 20 standard amino acids are always present as rows/columns.
     """
-    AA = list("ACDEFGHIKLMNPQRSTVWY")   # 20 standard AAs, alphabetical
     df = add_anchor_columns(df)
     matrix = pd.crosstab(df["a1_res"], df["a2_res"])
     # ensure all 20 AAs present even if some combos are missing
-    matrix = matrix.reindex(index=AA, columns=AA, fill_value=0)
+    matrix = matrix.reindex(index=AA_ORDER, columns=AA_ORDER, fill_value=0)
     return matrix
 
-
-def compute_anchor_combo_stats(df_raw: pd.DataFrame, df_p1: pd.DataFrame,
-                                df_p2: pd.DataFrame, out_dir: Path) -> None:
+def compute_anchor_combo_stats(stages: list, out_dir: Path) -> None:
     """
-    Anchor combination (a1+a2) analysis:
-      1. 3-panel 20x20 heatmap: Raw vs Post-Phase1 vs Post-Phase2
-      2. Per-allele combo stats CSV (post-Phase2)
-      3. Log summary
+    Anchor combination (a1+a2) analysis.
+    stages = [("Raw", df_raw), ("Post-Phase 1", df_p1)]         # phase1-only -> 2 panels
+    stages = [("Raw", df_raw), ("Post-Phase 1", df_p1), (...)]  # both phases -> 3 panels
     """
-    AA = list("ACDEFGHIKLMNPQRSTVWY")
-
-    # ── 1. three-panel 20x20 heatmap ──
-    stages = [
-        ("Raw",          df_raw),
-        ("Post-Phase 1", df_p1),
-        ("Post-Phase 2", df_p2),
-    ]
-
-    fig, axes = plt.subplots(1, 3, figsize=(22, 7))
+    n  = len(stages)
+ 
+    # ── 1. N-panel 20x20 heatmap ──
+    fig, axes = plt.subplots(1, n, figsize=(22 * n // 3, 7))
+    if n == 1:
+        axes = [axes]
+ 
     for ax, (label, df) in zip(axes, stages):
         matrix = _anchor_combo_matrix(df)
         im = ax.imshow(matrix.values, cmap="YlOrRd", aspect="auto")
         ax.set_xticks(range(20))
         ax.set_yticks(range(20))
-        ax.set_xticklabels(AA, fontsize=8)
-        ax.set_yticklabels(AA, fontsize=8)
+        ax.set_xticklabels(AA_ORDER, fontsize=8)
+        ax.set_yticklabels(AA_ORDER, fontsize=8)
         ax.set_xlabel("Anchor 2 (last position)")
         ax.set_ylabel("Anchor 1 (P2)")
         n_combos = int((matrix > 0).values.sum())
         ax.set_title(f"Anchor combo counts -- {label}\nn={len(df):,}  unique combos={n_combos}/400")
         plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-
+ 
     plt.suptitle("20x20 Anchor Combination Matrix (P2 x last position)", fontsize=13, y=1.02)
     plt.tight_layout()
     fig.savefig(out_dir / "anchor_combo_heatmap.png", dpi=150, bbox_inches="tight")
     plt.close()
     log.info(f"  Saved -> anchor_combo_heatmap.png")
-
-    # ── 2. per-allele combo stats CSV (post-Phase2 only) ──
-    df_p2_anc = add_anchor_columns(df_p2.copy())
-    df_p2_anc["anchor_combo"] = df_p2_anc["a1_res"] + df_p2_anc["a2_res"]
-
+ 
+    # ── 2. per-allele combo stats CSV (last stage only) ──
+    _, df_last = stages[-1]
+    df_last_anc = add_anchor_columns(df_last.copy())
+    df_last_anc["anchor_combo"] = df_last_anc["a1_res"] + df_last_anc["a2_res"]
+ 
     rows = []
-    for allele, grp in df_p2_anc.groupby(COL_MHC):
+    for allele, grp in df_last_anc.groupby(COL_MHC):
         combo_counts = grp["anchor_combo"].value_counts()
         top_combo    = combo_counts.index[0]
         top_ratio    = combo_counts.iloc[0] / len(grp)
@@ -587,11 +582,11 @@ def compute_anchor_combo_stats(df_raw: pd.DataFrame, df_p1: pd.DataFrame,
             "top_combo":       top_combo,
             "top_combo_ratio": round(top_ratio, 4),
         })
-
+ 
     combo_df = pd.DataFrame(rows).sort_values("top_combo_ratio", ascending=False)
     combo_df.to_csv(out_dir / "anchor_combo_stats.csv", index=False)
     log.info(f"  Anchor combo stats -> {out_dir}/anchor_combo_stats.csv")
-
+ 
     # ── 3. log summary ──
     log.info(f"  Avg unique combos/allele         : {combo_df['n_unique_combos'].mean():.1f}")
     log.info(f"  Alleles with only 1 combo        : {(combo_df['n_unique_combos'] == 1).sum()}")
@@ -603,7 +598,8 @@ def compute_anchor_combo_stats(df_raw: pd.DataFrame, df_p1: pd.DataFrame,
     log.info(combo_df.sort_values("n_unique_combos", ascending=False)[
         ["allele", "n_peptides", "n_unique_combos", "top_combo", "top_combo_ratio"]
     ].head(10).to_string(index=False))
-
+ 
+ 
 
 # ══════════════════════════════════════════════════════════════════
 # 9.  PER-ALLELE ANCHOR FRACTION PLOTS
@@ -711,6 +707,7 @@ def plot_per_allele_anchor_fractions(df: pd.DataFrame,
         log.info(f"  Saved -> {fname}")
 
     log.info(f"Per-allele anchor fraction plots done ({stage_label})")
+
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1012,59 +1009,85 @@ def main():
     parser.add_argument("--inspect", action="store_true", help="Peek at file and exit")
     parser.add_argument("--explore", action="store_true", help="Exploration only, no sampling")
     parser.add_argument("--plots",   default="plots",     help="Directory for plots and stats")
+    parser.add_argument("--phases",  default="both", choices=["only_phase1", "both"],
+                        help="Whether to run only phase 1 (MHC sampling) or both phases (MHC + anchor sampling).")
     args = parser.parse_args()
-
+ 
     if args.inspect:
         inspect_file(args.input)
         return
-
-    mode_label = "Binders" if args.mode == "binder" else "Non-binders"
-
+ 
+    mode_label  = "Binders" if args.mode == "binder" else "Non-binders"
+    phase1_only = args.phases == "only_phase1"
+ 
     out_dir = Path(args.plots)
-    df_raw  = load_data(args.input, mode=args.mode)
-
+    df_raw = load_data(args.input, mode=args.mode, phases=args.phases)
+ 
     explore(df_raw, out_dir)
-
+ 
     if args.explore:
         save_stats([compute_stats(df_raw, f"RAW ({mode_label}, class I)")], out_dir)
         log.info("Exploration-only mode. Exiting.")
         return
-
+ 
     if not args.output:
         parser.error("--output is required unless using --inspect or --explore")
-
+ 
     df_phase1 = phase1_mhc_sampling(df_raw)
-    df_phase2 = phase2_anchor_sampling(df_phase1)
-
-    save_stats([
-        compute_stats(df_raw,    f"RAW ({mode_label}, class I)"),
-        compute_stats(df_phase1, f"POST-PHASE 1 ({mode_label}, MHC balanced)"),
-        compute_stats(df_phase2, f"POST-PHASE 2 ({mode_label}, anchor balanced)"),
-    ], out_dir)
-
-    plot_comparison(
-        stages=[("Raw", df_raw), ("Post-Phase 1", df_phase1), ("Post-Phase 2", df_phase2)],
-        out_dir=out_dir,
-    )
-
-    log.info("=== Per-allele anchor fraction plots ===")
-    plot_per_allele_anchor_fractions(df_phase1, "Post-Phase 1", out_dir)
-    plot_per_allele_anchor_fractions(df_phase2, "Post-Phase 2", out_dir)
-
-    log.info("=== Anchor KL divergence boxplot ===")
-    plot_anchor_kl_divergence(
-        stages=[("Post-Phase 1", df_phase1), ("Post-Phase 2", df_phase2)],
-        out_dir=out_dir,
-    )
-
-    log.info("=== High-KL allele report ===")
-    report_high_kl_alleles(df_raw, df_phase1, df_phase2, out_dir)
-
-    log.info("=== Anchor combination diversity ===")
-    compute_anchor_combo_stats(df_raw, df_phase1, df_phase2, out_dir)
-
-    save_data(df_phase2, args.output)
-
-
+ 
+    if phase1_only:
+        stages = [("Raw", df_raw), ("Post-Phase 1", df_phase1)]
+ 
+        save_stats([
+            compute_stats(df_raw,    f"RAW ({mode_label}, class I)"),
+            compute_stats(df_phase1, f"POST-PHASE 1 ({mode_label}, MHC balanced)"),
+        ], out_dir)
+ 
+        plot_comparison(stages=stages, out_dir=out_dir)
+ 
+        log.info("=== Per-allele anchor fraction plots ===")
+        plot_per_allele_anchor_fractions(df_raw, "Raw", out_dir)
+        plot_per_allele_anchor_fractions(df_phase1, "Post-Phase 1", out_dir)
+ 
+        log.info("=== Anchor KL divergence boxplot ===")
+        plot_anchor_kl_divergence(stages=[("Raw", df_raw), ("Post-Phase 1", df_phase1)], out_dir=out_dir)
+ 
+        log.info("=== Anchor combination diversity ===")
+        compute_anchor_combo_stats(stages=stages, out_dir=out_dir)
+ 
+        log.info("Phase 1 only mode. Skipping Phase 2.")
+        save_data(df_phase1, args.output)
+ 
+    else:
+        df_phase2 = phase2_anchor_sampling(df_phase1)
+        stages = [("Raw", df_raw), ("Post-Phase 1", df_phase1), ("Post-Phase 2", df_phase2)]
+ 
+        save_stats([
+            compute_stats(df_raw,    f"RAW ({mode_label}, class I)"),
+            compute_stats(df_phase1, f"POST-PHASE 1 ({mode_label}, MHC balanced)"),
+            compute_stats(df_phase2, f"POST-PHASE 2 ({mode_label}, anchor balanced)"),
+        ], out_dir)
+ 
+        plot_comparison(stages=stages, out_dir=out_dir)
+ 
+        log.info("=== Per-allele anchor fraction plots ===")
+        plot_per_allele_anchor_fractions(df_phase1, "Post-Phase 1", out_dir)
+        plot_per_allele_anchor_fractions(df_phase2, "Post-Phase 2", out_dir)
+ 
+        log.info("=== Anchor KL divergence boxplot ===")
+        plot_anchor_kl_divergence(
+            stages=[("Post-Phase 1", df_phase1), ("Post-Phase 2", df_phase2)],
+            out_dir=out_dir,
+        )
+ 
+        log.info("=== High-KL allele report ===")
+        report_high_kl_alleles(df_raw, df_phase1, df_phase2, out_dir)
+ 
+        log.info("=== Anchor combination diversity ===")
+        compute_anchor_combo_stats(stages=stages, out_dir=out_dir)
+ 
+        save_data(df_phase2, args.output)
+ 
+ 
 if __name__ == "__main__":
     main()
