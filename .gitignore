@@ -4,6 +4,7 @@ plots*/
 data/
 logs/
 outputs/
+docs/
 __pycache__/
 scripts/
 PMGen/
