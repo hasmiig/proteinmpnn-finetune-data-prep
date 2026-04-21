@@ -41,4 +41,4 @@ Binder dataset reduced from 1.1M to 163k peptides. Non-binder dataset reduced fr
 PMGen input preparation.
 
 ## GitHub
-Pipeline and full documentation available in the GitHub repo.
+Pipeline and full documentation available in the scripts/ directory.

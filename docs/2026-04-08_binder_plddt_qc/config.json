@@ -21,7 +21,7 @@
         "cpus": 4,
         "time": "12:00:00"
     },
-    "input": "/projects/scc/MPG/MGMN/scc_mgmn_soeding/dir.project/hasmig/outputs/binder/",
+    "input": "/projects/scc/MPG/MGMN/scc_mgmn_soeding/dir.project/hasmig/data/pmgen_outputs/binder/",
     "output_csv": "/projects/scc/MPG/MGMN/scc_mgmn_soeding/dir.project/hasmig/outputs/binder/plddt_means_binder.csv",
     "output_best_csv": "/projects/scc/MPG/MGMN/scc_mgmn_soeding/dir.project/hasmig/outputs/binder/plddt_means_binder_best.csv"
 }

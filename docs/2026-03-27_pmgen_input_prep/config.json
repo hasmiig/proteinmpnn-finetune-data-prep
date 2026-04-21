@@ -2,15 +2,15 @@
     "date": "2026-03-27",
     "analyst": "Hasmig Aintablian",
     "scripts": {
-        "input_prep": "/user/hasmig.aintablian01/u26864/.project/dir.project/hasmig/scripts/prepare_pmgen_input.py",
-        "chunking": "/user/hasmig.aintablian01/u26864/.project/dir.project/hasmig/scripts/chunk_pmgen_input.py"
+        "input_prep": "/user/hasmig.aintablian01/u26864/.project/dir.project/hasmig/scripts/02_structure_prediction/prepare_pmgen_input.py",
+        "chunking": "/user/hasmig.aintablian01/u26864/.project/dir.project/hasmig/scripts/02_structure_prediction/chunk_tsv.py"
     },
     "settings": {
         "chunk_size": 4000,
     },
     "input": {
-        "binders_parquet": "/user/hasmig.aintablian01/u26864/.project/dir.project/hasmig/binder_sampled.parquet",
-        "nonbinders_parquet": "/user/hasmig.aintablian01/u26864/.project/dir.project/hasmig/nonbinder_sampled.parquet",
+        "binders_parquet": "/user/hasmig.aintablian01/u26864/.project/dir.project/hasmig/data/sampled/binders_sampled.parquet",
+        "nonbinders_parquet": "/user/hasmig.aintablian01/u26864/.project/dir.project/hasmig/data/sampled/nonbinders_sampled.parquet",
         "mhc_sequences": "/projects/scc/MPG/MGMN/scc_mgmn_soeding/dir.project/hasmig/data/raw/mhc1_encodings.csv"
     },
     "output": {
