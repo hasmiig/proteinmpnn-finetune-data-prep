@@ -18,8 +18,6 @@
         "n_chunks_binders": 41,
         "n_chunks_nonbinders": 31
     },
-    "output": {
-        "binders": "/projects/scc/MPG/MGMN/scc_mgmn_soeding/dir.project/hasmig/data/pmgen_outputs/binder/",
-        "nonbinders": "/projects/scc/MPG/MGMN/scc_mgmn_soeding/dir.project/hasmig/data/pmgen_outputs/nonbinder/"
-    }
+    "output": "/projects/scc/MPG/MGMN/scc_mgmn_soeding/dir.project/hasmig/data/pmgen_outputs/binder/"
+    
 }

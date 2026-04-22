@@ -1,8 +1,17 @@
 # ProteinMPNN Fine-tuning — pMHC Data Preparation
 
+## Citation
+
+This data preparation pipeline was developed for **PMGen: From Peptide-MHC Structure Prediction to Peptide Generation**.
+
+
+Pipeline repository: https://github.com/hasmiig/proteinmpnn-finetune-data-prep.git
+
+---
+
 End-to-end pipeline for curating a high-quality dataset of pMHC class I binder structures for fine-tuning ProteinMPNN. Starting from raw IEDB exports, the pipeline produces balanced, structure-predicted, QC-filtered datasets in ProteinMPNN-ready JSONL format with MHC chain fixed and peptide chain designable.
 
-This project is part of the **PMGen / FinetuneMPNN** effort. For full methodology and design decisions, see [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
+For full methodology and design decisions, see [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
 ---
 
@@ -23,6 +32,39 @@ IEDB export (binders only)
     ▼
 data.jsonl + fixed_positions.json  (per train/val/test fold)
 ```
+
+---
+
+## Quick Start
+
+If you have a clean IEDB export or similar pMHC class I dataset, here's the fastest path to ProteinMPNN-ready fine-tuning data:
+
+1. **Stage 1: Prepare & Balance** — Filter binders, balance alleles
+   ```bash
+   cd scripts/01_data_preparation/
+   python pmhc_sampling.py --input your_data.parquet --mode binder --phases only_phase1 --output binders_sampled.parquet --plots results/
+   ```
+   **Output:** Balanced dataset (~100–200k peptides), ready for structure prediction
+
+2. **Stage 2: Predict Structures** — Run PMGen (on a GPU cluster)
+   - Prepare input: `python prepare_pmgen_input.py`
+   - Chunk for parallel jobs: `python chunk_tsv.py --input pmgen_input.tsv --size 4000`
+   - Submit jobs: `for chunk in chunks/*.tsv; do sbatch run_pmgen.sh $chunk; done`
+   - **Output:** PDB files in `outputs/`
+
+3. **Stage 3: Filter & Split** — Apply pLDDT QC, rebalance, generate train/val/test
+   ```bash
+   cd scripts/03_filtering_analysis/
+   python compute_plddt_means.py --mode binder --base /path/to/outputs
+   python analyse_plddt.py  # Edit MODE, BASE, PLOTS_BASE constants at top of script
+   python filter_map_train_prep.py --plddt_csv outputs/binder/plddt_means_binder.csv \
+     --parquet binders_sampled.parquet --pdb_base_dir outputs/ \
+     --output_dir splits/ --split_mode hla
+   python prepare_pmhc_data.py --splits_dir splits/hla --output_dir proteinmpnn_input/
+   ```
+   **Output:** ProteinMPNN-ready JSONL files in `proteinmpnn_input/`
+
+For detailed options and troubleshooting, see the stage-specific READMEs in `scripts/`.
 
 ---
 
@@ -68,6 +110,78 @@ pip install pandas numpy matplotlib scipy pyarrow
 ```
 
 Structure prediction requires PMGen and a GPU node (see `scripts/utils/setup_env.sh`).
+
+---
+
+## Input Data Setup
+
+### Directory Structure
+
+Before starting, organize your input files as follows:
+
+```
+<your_project_root>/
+├── data/
+│   ├── raw/
+│   │   └── your_iedb_export.parquet          # Stage 1 input
+│   └── mhc1_encodings.csv                    # Stage 2 requirement: MHC sequences
+└── proteinmpnn-finetune-data-prep/
+    └── scripts/
+        ├── 01_data_preparation/
+        ├── 02_structure_prediction/
+        └── 03_filtering_analysis/
+```
+
+### Configuring Script Paths
+
+Several scripts have hardcoded paths at the top. Before first use, update these templates:
+
+**`scripts/02_structure_prediction/prepare_pmgen_input.py`**
+```python
+# Line ~10–15 (update these paths)
+PARQUET_PATH = "/path/to/binders_sampled.parquet"
+MHC_ENCODINGS_PATH = "/path/to/data/mhc1_encodings.csv"
+OUTPUT_PATH = "pmgen_input.tsv"
+```
+
+**`scripts/03_filtering_analysis/filter_map_train_prep.py`**
+```python
+# Line ~20–30 (set defaults or pass via CLI args)
+PLDDT_CSV = "outputs/binder/plddt_means_binder.csv"
+PARQUET_PATH = "binders_sampled.parquet"
+MHC_ENCODINGS_PATH = "data/mhc1_encodings.csv"
+PDB_BASE_DIR = "outputs/binder/"
+```
+
+Alternatively, all parameters can be passed as command-line arguments — see `python script_name.py --help` for options.
+
+### Required Columns in Input Data
+
+If using a different data source, ensure your `.parquet` or `.csv` has:
+
+| Column | Type | Example |
+|--------|------|----------|
+| `long_mer` | string | `LLFGYTWP` |
+| `allele` | string | `HLA-A*02:01` |
+| `assigned_label` | float | `1.0` (binder) or `0.0` (non-binder) |
+| `mhc_class` | float | `1.0` (MHC-I) |
+
+If your source uses different column names, update the constants at the top of `scripts/01_data_preparation/pmhc_sampling.py`:
+
+```python
+COL_PEPTIDE = "long_mer"           # your peptide sequence column
+COL_MHC     = "allele"             # your MHC allele column
+COL_LABEL   = "assigned_label"     # your binding label column
+MHC_CLASS   = "mhc_class"          # your MHC class column
+```
+
+---
+
+## Scope
+
+This project focuses on **MHC-I binder** data for ProteinMPNN fine-tuning.
+Non-binder support is present throughout the codebase (via `--mode nonbinder`)
+but was developed for a separate project and is not the focus of this pipeline.
 
 ---
 
@@ -186,10 +300,15 @@ Each job runs PMGen in `--initial_guess --multiple_anchors` mode, generating two
 ### 3a. Extract pLDDT means
 
 ```bash
-python compute_plddt_means.py
+python compute_plddt_means.py --mode binder --base /path/to/outputs
 ```
 
 Reads PMGen PDB outputs and writes `plddt_means_binder.csv` with per-structure mean peptide pLDDT and anchor pLDDT.
+
+**Flags:**
+- `--mode` — `binder` or `nonbinder` (required)
+- `--base` — Path to outputs folder containing chunk_* directories (required)
+- `--output` — Directory to save output CSV (optional; defaults to `base/mode/`)
 
 ### 3b. Analyse pLDDT distributions
 
@@ -198,6 +317,13 @@ python analyse_plddt.py
 ```
 
 Generates pLDDT histograms, applies the 80-threshold filter, and saves the best structure per (allele, peptide) pair to `plddt_means_binder_best.csv`.
+
+**Note:** This script uses hardcoded constants at the top. Before running, update:
+```python
+MODE = "binder"                          # or "nonbinder"
+BASE = Path("/path/to/outputs")          # Base outputs directory
+PLOTS_BASE = Path("/path/to/plots")      # Directory to save plots
+```
 
 ### 3c. Filter, re-sample, and split
 
@@ -217,7 +343,7 @@ python filter_map_train_prep.py \
 Four sequential stages:
 
 1. **Filter** — select best structure per (allele, peptide); apply pLDDT threshold
-2. **Map** — join back to original parquet to recover metadata and MHC sequences
+2. **Map** — join back to original parquet to recover metadata, MHC sequences, and paths to PDB files
 3. **Resample** — re-run iterative median sampling to correct any allele bias from prediction
 4. **Split** — train/val/test splits in one of two modes:
    - `hla` — rare alleles (bottom 20% by frequency) held out as test; k-fold CV on remainder
@@ -253,15 +379,102 @@ proteinmpnn_input/binder_hla/
 
 | Stage | Count |
 |---|---|
-| Initial IEDB MHC-I binders | ~250,000 |
-| After allele balancing | ~100,000 |
+| Initial IEDB MHC-I binders | ~1,100,000 |
+| After allele balancing | ~163,000 |
 | After structure prediction (pLDDT ≥ 80) | 87,187 |
 | After final re-balancing | **63,817** |
 | Unique MHC-I alleles | 426 |
 
 ---
 
+## Validating Your Run
+
+### Stage 1 — Data Preparation
+
+**Expected outputs** in the `--plots` directory:
+```
+results/binders/
+├── allele_distribution.pdf          # Bar chart: # peptides per allele
+├── anchor_heatmaps_*.pdf            # P2 × C-terminal anchor combinations
+├── sequence_length_dist.pdf         # Peptide length distribution
+└── summary_stats.txt                # Row counts before/after filtering
+```
+
+**Expected parquet size:**
+- Input: ~1M rows (raw IEDB)
+- Output: ~100–200k rows (after balancing)
+
+**Quick check:**
+```python
+import pandas as pd
+df = pd.read_parquet("binders_sampled.parquet")
+print(f"Rows: {len(df)}, Alleles: {df['allele'].nunique()}")
+# Expected: Rows: ~163000, Alleles: 459
+```
+
+---
+
+### Stage 2 — Structure Prediction
+
+**Expected outputs** in `outputs/`:
+```
+outputs/chunk_1/
+├── <peptide>_<allele>_0.pdb        # Structure 1
+├── <peptide>_<allele>_1.pdb        # Structure 2 (best structure kept later)
+└── ... (many more .pdb files)
+```
+
+**Expected counts:**
+- Input TSV: ~163k peptide–allele pairs (Stage 1 output)
+- Output PDBs: ~326k files (2 per pair)
+- Expected runtime: ~1–3 days on GPU cluster (size + hardware dependent)
+
+**Failure indicators:**
+- Fewer than ~10k PDBs across all chunks → check PMGen logs, GPU availability, or anchor enumeration
+
+---
+
+### Stage 3 — Filtering & Splitting
+
+**Expected outputs** in `proteinmpnn_input/`:
+
+```
+proteinmpnn_input/binder_hla/
+├── test/
+│   ├── data.jsonl                  # Hold-out test (rare alleles)
+│   └── fixed_positions.json
+├── fold_1/
+│   ├── train/
+│   │   ├── data.jsonl              # 60% of data
+│   │   └── fixed_positions.json
+│   └── val/
+│       ├── data.jsonl              # 20% of data
+│       └── fixed_positions.json
+├── fold_2/ ... fold_5/             # Repeat for 5-fold CV
+```
+
+**Expected size:**
+- Total records across train/val/test: **~60–65k** (after pLDDT filtering + re-balancing)
+- Per-fold train size: ~24–26k records
+- Per-fold val size: ~8–10k records
+
+**Quick check:**
+```bash
+# Count records in train JSONL (should be ~24k)
+wc -l proteinmpnn_input/binder_hla/fold_1/train/data.jsonl
+
+# Verify fixed_positions.json exists and contains chain A only
+python -c "import json; print(json.load(open('proteinmpnn_input/binder_hla/fold_1/train/fixed_positions.json')))"
+```
+
+**Common issue:** If counts are much lower than expected, check pLDDT threshold and allele filtering; see `filter_map_train_prep.py` logs.
+
+---
+
 ## Documentation
 
-- [docs/METHODOLOGY.md](docs/METHODOLOGY.md) — rationale for binders-only approach, sampling strategy, pLDDT thresholds, splitting design
+- [docs/METHODOLOGY.md](docs/METHODOLOGY.md) — rationale for binders-only approach,
+  sampling strategy, pLDDT thresholds, splitting design
 - `docs/<date>/` — per-run exploration plots and stats
+- `scripts/01_data_preparation/README.md` — `pmhc_sampling.py` usage and workflow
+- `scripts/03_filtering_analysis/README.md` — `filter_map_train_prep.py` usage and workflow

@@ -48,6 +48,28 @@ For each allele independently, we calculated amino acid frequencies at both anch
 
 **Decision:** Anchor residue balancing (Phase 2) was **not applied** to the final dataset. Anchor preferences in binders are a direct reflection of the MHC groove chemistry — preserving this variation is important for the design model to learn allele-specific constraints. Artificial homogenisation would destroy this signal.
 
+### Key Design Decisions
+
+#### Why Binders Only?
+
+ProteinMPNN learns to generate protein sequences conditioned on a backbone. When trained on non-binder pMHC structures, the model learns peptide conformations that **do not form stable interactions** with the MHC groove — directly contradicting the goal of designing binding peptides.
+
+**Our approach:** Train exclusively on confirmed binders (eluted ligands + binding measurements). This ensures the model learns which peptide backbones are stabilized at the pMHC interface.
+
+#### Why Phase 1 Sampling Only (No Anchor Balancing)?
+
+We evaluated two strategies:
+- **Phase 1:** Balance MHC allele representation
+- **Phase 2:** Further balance anchor residue combinations within each allele
+
+Initial analysis showed that per-allele anchor profiles (P2 × C-terminal) reflect fundamental MHC groove chemistry:
+- HLA-A*02:01 strongly prefers Leu/Met at P2 (biochemically constrained)
+- HLA-B*07:02 shows different anchor preferences
+
+**Decision:** Phase 2 was **not applied** to the final dataset. Artificially homogenizing anchor distributions would destroy the model's ability to learn allele-specific binding constraints. Binder datasets naturally reflect these preferences — applying further balancing would introduce bias, not reduce it.
+
+**Result:** The final dataset preserves known MHC-peptide biology while being balanced across allele frequencies.
+
 ---
 
 ## Structure Prediction with PMGen
