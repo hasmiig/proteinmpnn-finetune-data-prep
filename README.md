@@ -475,6 +475,6 @@ python -c "import json; print(json.load(open('proteinmpnn_input/binder_hla/fold_
 
 - [docs/METHODOLOGY.md](docs/METHODOLOGY.md) — rationale for binders-only approach,
   sampling strategy, pLDDT thresholds, splitting design
-- `docs/<date>/` — per-run exploration plots and stats
-- `scripts/01_data_preparation/README.md` — `pmhc_sampling.py` usage and workflow
-- `scripts/03_filtering_analysis/README.md` — `filter_map_train_prep.py` usage and workflow
+- [`docs/<date>/`](docs/) — per-run exploration plots and stats
+- [`scripts/01_data_preparation/README.md`](scripts/01_data_preparation/README.md) — `pmhc_sampling.py` usage and workflow
+- [`scripts/03_filtering_analysis/README.md`](scripts/03_filtering_analysis/README.md) — `filter_map_train_prep.py` usage and workflow
